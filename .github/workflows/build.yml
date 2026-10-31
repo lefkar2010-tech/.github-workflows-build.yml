@@ -1,216 +1,459 @@
-                  b.setOnTouchListener { _, e ->
-                      when (e.action) {
-                          MotionEvent.ACTION_DOWN -> { dx = e.rawX; dy = e.rawY; sx = p.x; sy = p.y; moved = false }
-                          MotionEvent.ACTION_MOVE -> {
-                              if (Math.abs(e.rawX - dx) > 12 || Math.abs(e.rawY - dy) > 12) moved = true
-                              if (moved) {
-                                  p.x = sx + (e.rawX - dx).toInt()
-                                  p.y = sy + (e.rawY - dy).toInt()
-                                  wm.updateViewLayout(b, p)
-                                  if (radial != null) toggleRadial()
-                              }
-                          }
-                          MotionEvent.ACTION_UP -> if (!moved) toggleRadial()
-                      }
-                      true
-                  }
-                  bubble = b
-                  bubbleP = p
-                  wm.addView(b, p)
+name: Build APK
+on: [push, workflow_dispatch]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Write project files
+        run: |
+          mkdir -p  app app/src/main app/src/main/assets app/src/main/java/com/example/gmtools app/src/main/res/values app/src/main/res/xml
+          cat > settings.gradle.kts <<'GMT_EOF_0'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = "GrandMobileTools"
+          include(":app")
+          GMT_EOF_0
+          cat > build.gradle.kts <<'GMT_EOF_1'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          GMT_EOF_1
+          cat > gradle.properties <<'GMT_EOF_2'
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          kotlin.code.style=official
+          GMT_EOF_2
+          cat > app/build.gradle.kts <<'GMT_EOF_3'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+          android {
+              namespace = "com.example.gmtools"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "com.example.gmtools"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
               }
-
-              private fun toggleRadial() {
-                  val old = radial
-                  if (old != null) {
-                      wm.removeView(old)
-                      radial = null
-                      return
-                  }
-                  val s = dp(240)
-                  val bp = bubbleP
-                  val v = Radial(this) { i -> hd.post { toggleRadial(); if (i == 0) openReports() else openAdmin() } }
-                  wm.addView(v, lp(s, s, Gravity.TOP or Gravity.START, bp.x + dp(22) - s / 2, bp.y + dp(22) - s / 2))
-                  radial = v
-                  hd.post {
-                      val b = bubble
-                      if (b != null) {
-                          wm.removeView(b)
-                          wm.addView(b, bp)
-                      }
-                  }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
               }
+              kotlinOptions { jvmTarget = "17" }
+          }
+          GMT_EOF_3
+          cat > app/src/main/AndroidManifest.xml <<'GMT_EOF_4'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:label="Grand Mobile Tools"
+                  android:icon="@android:drawable/sym_def_app_icon"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <service
+                      android:name=".GmService"
+                      android:label="Grand Mobile Tools"
+                      android:exported="false"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+                      <meta-data android:name="android.accessibilityservice" android:resource="@xml/a11y" />
+                  </service>
+              </application>
+          </manifest>
+          GMT_EOF_4
+          cat > app/src/main/res/xml/a11y.xml <<'GMT_EOF_5'
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:description="@string/a11y_desc"
+              android:accessibilityEventTypes="typeViewTextChanged|typeWindowContentChanged|typeWindowStateChanged"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
+              android:canRetrieveWindowContent="true"
+              android:notificationTimeout="100" />
+          GMT_EOF_5
+          cat > app/src/main/res/values/strings.xml <<'GMT_EOF_6'
+          <resources>
+              <string name="a11y_desc">Читает чат игры, показывает кружок с админ-меню и отправляет команды в чат.</string>
+          </resources>
+          GMT_EOF_6
+          cat > app/src/main/assets/navigator.cfg <<'GMT_EOF_7'
+          1. Филиал ROSTIC'S
 
-              // ---------- репорты и окно жалобы ----------
-              private fun openReports() {
-                  val b = col()
-                  if (Core.reports.isEmpty()) add(b, tv("Новых репортов нет"))
-                  for (r in Core.reports.toList()) {
-                      val rw = row()
-                      add(rw, tv(r.time + "  " + r.nick + "[" + r.id + "]\n" + r.text + " · очередь " + r.queue, 13f), 4f)
-                      add(rw, btn("✓", 0xFF8B2C3C.toInt()) { Core.closed.add(r.key); Core.reports.remove(r); close("rep"); openComplaint(r) }, 1f)
-                      add(b, rw)
-                  }
-                  panel("rep", "Репорты (" + Core.reports.size + ")", b, 340, false)
-              }
+          2. Ивент Хэллоуин
 
-              private fun answer(r: Report, t: String) {
-                  send("/ans " + r.id + " " + t)
-                  close("cmp"); close("qa"); close("nav")
-              }
+          3. Общественные места
+          3.1. Автошкола
+          3.2. Военкомат
+          3.3. Банк г. Южный
+          3.4. Банк г. Арзамас
+          3.5. Банк пгт. Батырево
+          3.6. Церковь
+          3.7. Авторынок
+          3.8. Почтовое отделение
 
-              private fun openComplaint(r: Report) {
-                  val inp = et("Введите свой ответ")
-                  val b = col(tv("Жалоба/Вопрос от: " + r.nick + "[" + r.id + "]", 15f, true), tv(r.text, 15f))
-                  val rw = row()
-                  add(rw, inp, 3f)
-                  add(rw, btn("Ответить") { if (inp.text.isNotBlank()) answer(r, inp.text.toString().trim()) }, 1.4f)
-                  add(b, rw)
-                  add(b, grid(2, listOf(
-                      btn("Уточните") { answer(r, "Приветствую, уточните ваш вопрос/жалобу.") },
-                      btn("Оффтоп") { answer(r, "Приветствую, при последующем оффтопе вы будете наказаны.") },
-                      btn("Другие наказания") { openPunish(r.id) },
-                      btn("GPS Навигатор") { openNav(r) },
-                      btn("Быстрые ответы") { openQuick(r) },
-                      btn("Помощь в пути") {
-                          send("/ans " + r.id + " Приветствую, сейчас попробую вам помочь.", "/sp " + r.id)
-                          close("cmp")
-                          openPunish(r.id)
-                      },
-                      btn("Спросить в /a") { send("/a " + r.nick + "[" + r.id + "]: " + r.text); close("cmp") }
-                  )))
-                  panel("cmp", "Жалоба/Вопрос от игрока", b, 360, false)
-              }
+          4. Вокзалы
+          4.1. Автовокзал г. Арзамас
+          4.2. Автовокзал г. Южный
+          4.3. Автовокзал пгт. Батырево
+          4.4. Автовокзал пгт. Эдово
+          4.5. Морской вокзал г. Арзамас
 
-              private fun openQuick(r: Report) {
-                  val b = col()
-                  for (a in Core.list(this, "ans", Core.ANS)) add(b, btn(a[0], 0xFF2A2D4A.toInt()) { answer(r, a[1]) })
-                  panel("qa", "Быстрые ответы", b, 340, true)
-              }
+          5. Автосалоны / стоянки
+          5.1. Автосалон Эконом
+          5.2. Автосалон Комфорт
+          5.3. Автосалон Премиум
+          5.4. Мотосалон
+          5.5. Стоянка г. Арзамас
+          5.6. Стоянка пгт. Батырево
+          5.7. Стоянка г. Южный
+          5.8. Стоянка г. Эдово
+          5.9. СТО 'Реактор'
 
-              private fun openNav(r: Report) {
-                  val b = col()
-                  for ((cat, items) in Core.nav(this)) {
-                      if (items.isEmpty()) {
-                          add(b, btn(cat, 0xFF2A2D4A.toInt()) { answer(r, "GPS → " + cat) })
-                      } else {
-                          add(b, tv(cat, 14f, true))
-                          for (s in items) add(b, btn(s, 0xFF2A2D4A.toInt()) { answer(r, "GPS → " + cat + " → " + s) })
-                      }
-                  }
-                  panel("nav", "GPS Навигатор", b, 340, true)
-              }
+          6. Государственные организации
+          6.1. Правительство
+          6.2. Воинская часть
+          6.3. Больница г. Арзамас
+          6.4. Больница г. Южный
+          6.5. Новостная сеть
+          6.6. Полиция г. Арзамас
+          6.7. Полиция г. Южный
+          6.8. ФСБ
 
-              // ---------- наказания ----------
-              private fun openPunish(id: String) {
-                  val b = col()
-                  for (p in Core.PUN) add(b, btn(p[0]) { openPun(p[0], p[1], id) })
-                  panel("pun", "Наказание ID " + id, b, 190, false)
-              }
+          7. Криминальные организации
+          7.1. Тамбовская ОПГ
+          7.2. Курганская ОПГ
+          7.3. Ореховская ОПГ
+          7.4. Кавказская ОПГ
+          7.5. Чёрный рынок
 
-              private fun openPun(name: String, tpl: String, id: String) {
-                  var reason = ""
-                  var time = ""
-                  val hasTime = tpl.contains("{time}")
-                  val rs = listOf("ДМ", "ДБ", "ДМ ЗЗ", "ган ЗЗ", "ТК", "СК", "опру", "nonRP")
-                  val ts = listOf("20", "30", "60", "120", "180", "300", "1000", "3000")
-                  val rc = col()
-                  val tc = col()
-                  fun mark(c: LinearLayout, sel: Int) {
-                      for (i in 0 until c.childCount) c.getChildAt(i).background = bg(if (i == sel) 0xFF5B3FD4.toInt() else 0xFF2A2D4A.toInt(), 8)
-                  }
-                  rs.forEachIndexed { i, s -> add(rc, btn(s, 0xFF2A2D4A.toInt()) { reason = s; mark(rc, i) }) }
-                  if (hasTime) ts.forEachIndexed { i, s -> add(tc, btn(s + " мин.", 0xFF2A2D4A.toInt()) { time = s; mark(tc, i) }) }
-                  val cr = et("Другая причина")
-                  val cm = et("Минуты")
-                  val ok = btn("Подтвердить") {
-                      val r = (if (cr.text.isNotBlank()) cr.text.toString() else reason).trim().lowercase()
-                      val t = (if (cm.text.isNotBlank()) cm.text.toString() else time).trim()
-                      if (r.isEmpty() || (hasTime && t.isEmpty())) {
-                          toast("Выберите причину" + (if (hasTime) " и время" else ""))
-                      } else {
-                          send(tpl.replace("{id}", id).replace("{time}", t).replace("{reason}", r))
-                          close("pd")
-                      }
-                  }
-                  val b = col(tv(name + "  ID " + id, 17f, true))
-                  add(b, if (hasTime) row(rc, tc) else row(rc))
-                  add(b, if (hasTime) row(cr, cm) else row(cr))
-                  add(b, row(ok, btn("Отмена", 0xFF8B2C3C.toInt()) { close("pd") }))
-                  panel("pd", "Быстрые наказания", b, 340, true)
-              }
+          8. Начальные работы
+          8.1. Завод Tesla
+          8.2. Завод СТЕП
+          8.3. Шахта
+          8.4. Ферма
+          8.5. Сортировочный центр
+          8.6. Ресторан ROSTIC'S
 
-              // ---------- админ меню ----------
-              private fun openAdmin() {
-                  val content = col()
-                  val side = col(btn("Редактор") { editor(content) }, btn("Логи") { logs(content) })
-                  val b = row()
-                  add(b, side, 1f)
-                  add(b, content, 2.4f)
-                  editor(content)
-                  panel("adm", "Админ меню", b, 360, true)
-              }
+          9. Работы
+          9.1. Таксист
+          9.2. Водитель автобуса
+          9.3. Почтальон
+          9.4. Механик
+          9.5. Дальнобойщик
+          9.6. Инкассатор
+          9.7. Дорожная служба Южного
+          9.8. Дорожная служба Арзамаса
+          9.9. Мусорщик
+          9.10. Рыбалка
 
-              private fun editor(c: LinearLayout) {
-                  c.removeAllViews()
-                  add(c, tv("Редактор", 16f, true))
-                  add(c, btn("Быстрые ответы") { listEd(c, "ans", Core.ANS, listOf("Название", "Ответ")) { it[0] + " → " + it[1] } })
-                  add(c, btn("Быстрые наказания") { listEd(c, "rules", Core.RULES, listOf("Сокращение (mu)", "Команда (mute)", "Аргументы (20 2.7 ОП)")) { "/" + it[0] + " → /" + it[1] + " {id} " + (if (it.size > 2) it[2] else "") } })
-              }
+          10. Развлечения
+          10.1. Grand Casino
+          10.2. Аукцион контейнеров
+          10.3. Дрифт зона
+          10.4. Парк отдыха
 
-              private fun listEd(c: LinearLayout, key: String, def: List<List<String>>, hints: List<String>, fmt: (List<String>) -> String) {
-                  c.removeAllViews()
-                  add(c, btn("← Редактор", 0xFF2A2D4A.toInt()) { editor(c) })
-                  val data = Core.list(this, key, def)
-                  data.forEachIndexed { i, r ->
-                      val rw = row()
-                      add(rw, tv(fmt(r), 12f), 3f)
-                      add(rw, btn("Удалить", 0xFF3A55C8.toInt()) { data.removeAt(i); Core.save(this, key, data); listEd(c, key, def, hints, fmt) }, 1.3f)
-                      add(c, rw)
-                  }
-                  val f = hints.map { et(it) }
-                  f.forEach { add(c, it) }
-                  add(c, btn("Добавить") {
-                      val v = f.map { it.text.toString().trim() }
-                      if (v.take(2).all { it.isNotEmpty() }) {
-                          data.add(v.toMutableList())
-                          Core.save(this, key, data)
-                          listEd(c, key, def, hints, fmt)
-                      }
-                  })
-              }
+          11. Нотариальное Агентство
 
-              private fun logs(c: LinearLayout) {
-                  c.removeAllViews()
-                  add(c, tv("Логи", 16f, true))
-                  val q = et("Поиск по чату")
-                  val out = col()
-                  fun upd() {
-                      out.removeAllViews()
-                      val s = q.text.toString().trim()
-                      val m = Core.logs.filter { s.isEmpty() || it.contains(s, true) }.takeLast(60).reversed()
-                      if (m.isEmpty()) add(out, tv("Ничего нет"))
-                      for (l in m) add(out, tv(l, 12f))
-                  }
-                  q.addTextChangedListener(object : TextWatcher {
-                      override fun afterTextChanged(s: Editable?) { upd() }
-                      override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, d: Int) {}
-                      override fun onTextChanged(s: CharSequence?, a: Int, b: Int, d: Int) {}
-                  })
-                  add(c, q)
-                  add(c, out)
-                  upd()
+          12. Вертолётные и морские клубы
+          12.1. Вертолётный клуб г. Южный
+          12.2. Вертолётный клуб г. Арзамас
+          12.3. Яхт-клуб №1
+          12.4. Яхт-клуб №2
+          12.5. Яхт-клуб №3
+
+          13. Скупщики
+          13.1. Скупщик г. Южный
+          13.2. Скупщик г. Арзамас
+
+          14. Бизнесы
+
+          15. Моя недвижимость
+          15.1. Дом
+          15.2. Квартира
+          15.3. Бизнес
+          15.4. Дом семьи
+
+          16. Ближайшие места
+          16.1. Ближайший банкомат
+          16.2. Ближайшая Grand шаурма
+          16.3. Ближайшая заправка
+          16.4. Ближайший магазин 24/7
+          16.5. Ближайший ресторан
+          GMT_EOF_7
+          cat > app/src/main/java/com/example/gmtools/MainActivity.kt <<'GMT_EOF_8'
+          package com.example.gmtools
+
+          import android.app.Activity
+          import android.content.Intent
+          import android.os.Bundle
+          import android.provider.Settings
+          import android.widget.Button
+          import android.widget.LinearLayout
+          import android.widget.TextView
+
+          class MainActivity : Activity() {
+              override fun onCreate(b: Bundle?) {
+                  super.onCreate(b)
+                  val l = LinearLayout(this)
+                  l.orientation = LinearLayout.VERTICAL
+                  l.setPadding(48, 80, 48, 48)
+                  val t = TextView(this)
+                  t.textSize = 16f
+                  t.text = "Grand Mobile Tools\n\n1. Нажми кнопку ниже и включи службу «Grand Mobile Tools».\n2. Открой игру: появится кружок GM.\n\nЕсли переключатель недоступен: Настройки → Приложения → Grand Mobile Tools → ⋮ → «Разрешить ограниченные настройки»."
+                  val bt = Button(this)
+                  bt.text = "Открыть специальные возможности"
+                  bt.setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                  l.addView(t)
+                  l.addView(bt)
+                  setContentView(l)
               }
           }
-          GMT_EOF_11
-      - name: Build debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
-      - uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-      - name: Publish APK to Releases
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: build-${{ github.run_number }}
-          name: "Grand Mobile Tools build ${{ github.run_number }}"
-          files: app/build/outputs/apk/debug/app-debug.apk
+          GMT_EOF_8
+          cat > app/src/main/java/com/example/gmtools/Ui.kt <<'GMT_EOF_9'
+          package com.example.gmtools
+
+          import android.content.Context
+          import android.graphics.Canvas
+          import android.graphics.Paint
+          import android.graphics.RectF
+          import android.view.MotionEvent
+          import android.view.View
+
+          class Radial(c: Context, val pick: (Int) -> Unit) : View(c) {
+              private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+              private val names = arrayOf("Репорт", "Админ меню")
+
+              override fun onDraw(cv: Canvas) {
+                  val w = width.toFloat()
+                  val m = w / 2
+                  val r = RectF(4f, 4f, w - 4, w - 4)
+                  p.style = Paint.Style.FILL
+                  for (i in 0 until 4) {
+                      p.color = if (i < 2) 0xFF6A3FD4.toInt() else 0x66303050
+                      cv.drawArc(r, -90f + i * 90f + 1.5f, 87f, true, p)
+                  }
+                  p.color = 0xFF14162B.toInt()
+                  cv.drawCircle(m, m, w * 0.2f, p)
+                  p.color = -1
+                  p.textSize = w * 0.07f
+                  p.textAlign = Paint.Align.CENTER
+                  p.isFakeBoldText = true
+                  for (i in 0 until 2) {
+                      val a = Math.toRadians((-45 + i * 90).toDouble())
+                      cv.drawText(names[i], m + (Math.cos(a) * w * 0.33).toFloat(), m + (Math.sin(a) * w * 0.33).toFloat() + p.textSize / 3, p)
+                  }
+              }
+
+              override fun onTouchEvent(e: MotionEvent): Boolean {
+                  if (e.action == MotionEvent.ACTION_UP) {
+                      val m = width / 2f
+                      val dx = e.x - m
+                      val dy = e.y - m
+                      val r = width * 0.2f
+                      if (dx * dx + dy * dy > r * r && dx > 0) pick(if (dy < 0) 0 else 1)
+                  }
+                  return true
+              }
+          }
+          GMT_EOF_9
+          cat > app/src/main/java/com/example/gmtools/Core.kt <<'GMT_EOF_10'
+          package com.example.gmtools
+
+          import android.content.Context
+          import org.json.JSONArray
+
+          class Report(val time: String, val nick: String, val id: String, val text: String, val queue: String) {
+              val key: String get() = time + "|" + id + "|" + text
+          }
+
+          object Core {
+              val reports = ArrayList<Report>()
+              val logs = ArrayList<String>()
+              val closed = HashSet<String>()
+              var onChange: (() -> Unit)? = null
+              private val seen = HashMap<String, Long>()
+
+              private val rep = Regex("""(?:(\d{1,2}:\d{2}(?::\d{2})?)\]?\s+)?([A-Za-z0-9_А-Яа-я.\-]+)[\[(](\d{1,5})[\])]:?\s*(.*?)\s*\[К-?во репорта:?\s*(\d+)\s*\]""", RegexOption.IGNORE_CASE)
+              private val line = Regex("""^\W{0,3}(?:\d{1,2}:\d{2}(?::\d{2})?\W{0,3}\s*)?(?:<ADM>|[A-Za-z0-9_А-Яа-я.\-]+[\[(]\d{1,5}[\])])""")
+              private val ans = Regex("""(\S+)[\[(]\d{1,5}[\])]:?\s+ответил\s+\S+[\[(](\d{1,5})[\])]""", RegexOption.IGNORE_CASE)
+
+              fun feed(lines: List<String>, quiet: Boolean) {
+                  val now = System.currentTimeMillis()
+                  var ch = false
+                  for (l in lines) {
+                      if (!line.containsMatchIn(l)) continue
+                      val p = seen[l]
+                      seen[l] = now
+                      if (quiet || (p != null && now - p < 30000)) continue
+                      logs.add(l)
+                      if (logs.size > 3000) logs.removeAt(0)
+                      ch = true
+                      val m = rep.find(l)
+                      if (m != null) {
+                          val r = Report(m.groupValues[1], m.groupValues[2], m.groupValues[3], m.groupValues[4], m.groupValues[5])
+                          if (r.key !in closed && reports.none { it.key == r.key }) reports.add(r)
+                      }
+                      val a = ans.find(l)
+                      if (a != null && !a.groupValues[1].equals("Grnd_Bot", true)) reports.removeAll { it.id == a.groupValues[2] }
+                  }
+                  if (seen.size > 600) seen.entries.removeAll { now - it.value > 600000 }
+                  if (ch) onChange?.invoke()
+              }
+
+              fun list(c: Context, k: String, def: List<List<String>>): MutableList<MutableList<String>> {
+                  val s = c.getSharedPreferences("gmt", 0).getString(k, null)
+                  if (s == null) return def.map { it.toMutableList() }.toMutableList()
+                  val a = JSONArray(s)
+                  val out = ArrayList<MutableList<String>>()
+                  for (i in 0 until a.length()) {
+                      val r = a.getJSONArray(i)
+                      out.add((0 until r.length()).map { r.getString(it) }.toMutableList())
+                  }
+                  return out
+              }
+
+              fun save(c: Context, k: String, v: List<List<String>>) {
+                  c.getSharedPreferences("gmt", 0).edit().putString(k, JSONArray(v.map { JSONArray(it) }).toString()).apply()
+              }
+
+              fun nav(c: Context): List<Pair<String, List<String>>> {
+                  val out = ArrayList<Pair<String, MutableList<String>>>()
+                  val re = Regex("""^(\d+)(\.\d+)?\.\s+(.+)$""")
+                  for (l in c.assets.open("navigator.cfg").bufferedReader().readLines()) {
+                      val m = re.find(l.trim()) ?: continue
+                      if (m.groupValues[2].isEmpty()) out.add(Pair(m.groupValues[3], ArrayList<String>())) else out.lastOrNull()?.second?.add(m.groupValues[3])
+                  }
+                  return out
+              }
+
+              val ANS = listOf(
+                  listOf("не пред услугу", "не предоставляем данную услугу"),
+                  listOf("не тп", "не телепортируем"),
+                  listOf("рп процесс", "не вмешиваемся в РП процесс"),
+                  listOf("узнайте у игроков", "данную информацию можете узнать у игроков"),
+                  listOf("не владеем инф", "не владеем данной информацией"),
+                  listOf("мп", "телепорт на мероприятие закрыт"),
+                  listOf("не согл с наказ", "не согласны с наказанием? Напишите жалобу"),
+                  listOf("док-ва", "если есть доказательства - напишите жалобу"),
+                  listOf("приятной игры", "приятной игры на Grand Mobile"),
+                  listOf("озн с правилами", "ознакомьтесь с правилами в лаунчере игры")
+              )
+
+              val RULES = listOf(
+                  listOf("mu", "mute", "20 2.7 ОП"), listOf("osk", "mute", "30 2.1 ОП"), listOf("fl", "mute", "20 2.2 ОП"),
+                  listOf("rod", "ban", "7 2.1 ОП"), listOf("qwe", "ban", "31 5.2 ОП"), listOf("zxc", "ban", "31 снят/адм"),
+                  listOf("adm", "ban", "3 3.2 ОП"), listOf("dm", "jail", "60 DM"), listOf("db", "jail", "40 DB"),
+                  listOf("ub", "jail", "30 UB"), listOf("gz", "jail", "120 1.1 GZ"), listOf("gzz", "warn", "1.1 GZ"),
+                  listOf("sk", "jail", "60 SK"), listOf("skk", "warn", "SK"), listOf("opg", "warn", "2.2 ОПГ"),
+                  listOf("dom", "jail", "60 5.7 ОП"), listOf("domm", "warn", "5.7 ОП"), listOf("tk", "jail", "60 TK"), listOf("tkk", "warn", "TK")
+              )
+
+              val PUN = listOf(
+                  listOf("MUTE", "/mute {id} {time} {reason}"), listOf("JAIL", "/jail {id} {time} {reason}"),
+                  listOf("KICK", "/kick {id} {reason}"), listOf("BAN", "/ban {id} {time} {reason}"),
+                  listOf("WARN", "/warn {id} {reason}"), listOf("SKICK", "/skick {id} {reason}")
+              )
+          }
+          GMT_EOF_10
+          cat > app/src/main/java/com/example/gmtools/GmService.kt <<'GMT_EOF_11'
+          package com.example.gmtools
+
+          import android.accessibilityservice.AccessibilityService
+          import android.graphics.PixelFormat
+          import android.graphics.Typeface
+          import android.graphics.drawable.GradientDrawable
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.text.Editable
+          import android.text.TextWatcher
+          import android.view.Gravity
+          import android.view.MotionEvent
+          import android.view.View
+          import android.view.WindowManager
+          import android.view.accessibility.AccessibilityEvent
+          import android.view.accessibility.AccessibilityNodeInfo
+          import android.view.accessibility.AccessibilityWindowInfo
+          import android.widget.EditText
+          import android.widget.LinearLayout
+          import android.widget.ScrollView
+          import android.widget.TextView
+          import android.widget.Toast
+
+          class GmService : AccessibilityService() {
+              private val hd = Handler(Looper.getMainLooper())
+              private lateinit var wm: WindowManager
+              private lateinit var bubbleP: WindowManager.LayoutParams
+              private val wins = HashMap<String, View>()
+              private var bubble: View? = null
+              private var radial: View? = null
+              private var base = ""
+              private var pend = false
+              private var edit: AccessibilityNodeInfo? = null
+              private var lastSet = ""
+              private val expandTask = Runnable { expand() }
+
+              override fun onServiceConnected() {
+                  super.onServiceConnected()
+                  wm = getSystemService(WINDOW_SERVICE) as WindowManager
+                  Core.onChange = { if (wins.containsKey("rep")) openReports() }
+                  showBubble()
+              }
+
+              override fun onInterrupt() {}
+
+              override fun onDestroy() {
+                  wins.keys.toList().forEach { close(it) }
+                  radial?.let { wm.removeView(it) }
+                  bubble?.let { wm.removeView(it) }
+                  Core.onChange = null
+                  super.onDestroy()
+              }
+
+              // ---------- чтение чата и отправка ----------
+              override fun onAccessibilityEvent(e: AccessibilityEvent?) {
+                  if (e == null || e.packageName?.toString() == packageName) return
+                  if (e.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
+                      val s = e.source
+                      if (s != null && s.isEditable) {
+                          edit = s
+                          hd.removeCallbacks(expandTask)
+                          hd.postDelayed(expandTask, 600)
+                      }
+                  }
+                  if (!pend) {
+                      pend = true
+                      hd.postDelayed({ pend = false; scan() }, 300)
+                  }
+              }
+
+              private fun gameRoot(): AccessibilityNodeInfo? {
+                  for (w in windows) {
+                      val r = w.root ?: continue
+                      if (w.type == AccessibilityWindowInfo.TYPE_APPLICATION && r.packageName?.toString() != packageName) return r
+                  }
+                  val a = rootInActiveWindow
+                  return if (a != null && a.packageName?.toString() != packageName) a else null
+              }
+
+              private fun walk(n: AccessibilityNodeInfo?, out: MutableList<
