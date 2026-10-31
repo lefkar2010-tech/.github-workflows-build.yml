@@ -1,0 +1,216 @@
+                  b.setOnTouchListener { _, e ->
+                      when (e.action) {
+                          MotionEvent.ACTION_DOWN -> { dx = e.rawX; dy = e.rawY; sx = p.x; sy = p.y; moved = false }
+                          MotionEvent.ACTION_MOVE -> {
+                              if (Math.abs(e.rawX - dx) > 12 || Math.abs(e.rawY - dy) > 12) moved = true
+                              if (moved) {
+                                  p.x = sx + (e.rawX - dx).toInt()
+                                  p.y = sy + (e.rawY - dy).toInt()
+                                  wm.updateViewLayout(b, p)
+                                  if (radial != null) toggleRadial()
+                              }
+                          }
+                          MotionEvent.ACTION_UP -> if (!moved) toggleRadial()
+                      }
+                      true
+                  }
+                  bubble = b
+                  bubbleP = p
+                  wm.addView(b, p)
+              }
+
+              private fun toggleRadial() {
+                  val old = radial
+                  if (old != null) {
+                      wm.removeView(old)
+                      radial = null
+                      return
+                  }
+                  val s = dp(240)
+                  val bp = bubbleP
+                  val v = Radial(this) { i -> hd.post { toggleRadial(); if (i == 0) openReports() else openAdmin() } }
+                  wm.addView(v, lp(s, s, Gravity.TOP or Gravity.START, bp.x + dp(22) - s / 2, bp.y + dp(22) - s / 2))
+                  radial = v
+                  hd.post {
+                      val b = bubble
+                      if (b != null) {
+                          wm.removeView(b)
+                          wm.addView(b, bp)
+                      }
+                  }
+              }
+
+              // ---------- репорты и окно жалобы ----------
+              private fun openReports() {
+                  val b = col()
+                  if (Core.reports.isEmpty()) add(b, tv("Новых репортов нет"))
+                  for (r in Core.reports.toList()) {
+                      val rw = row()
+                      add(rw, tv(r.time + "  " + r.nick + "[" + r.id + "]\n" + r.text + " · очередь " + r.queue, 13f), 4f)
+                      add(rw, btn("✓", 0xFF8B2C3C.toInt()) { Core.closed.add(r.key); Core.reports.remove(r); close("rep"); openComplaint(r) }, 1f)
+                      add(b, rw)
+                  }
+                  panel("rep", "Репорты (" + Core.reports.size + ")", b, 340, false)
+              }
+
+              private fun answer(r: Report, t: String) {
+                  send("/ans " + r.id + " " + t)
+                  close("cmp"); close("qa"); close("nav")
+              }
+
+              private fun openComplaint(r: Report) {
+                  val inp = et("Введите свой ответ")
+                  val b = col(tv("Жалоба/Вопрос от: " + r.nick + "[" + r.id + "]", 15f, true), tv(r.text, 15f))
+                  val rw = row()
+                  add(rw, inp, 3f)
+                  add(rw, btn("Ответить") { if (inp.text.isNotBlank()) answer(r, inp.text.toString().trim()) }, 1.4f)
+                  add(b, rw)
+                  add(b, grid(2, listOf(
+                      btn("Уточните") { answer(r, "Приветствую, уточните ваш вопрос/жалобу.") },
+                      btn("Оффтоп") { answer(r, "Приветствую, при последующем оффтопе вы будете наказаны.") },
+                      btn("Другие наказания") { openPunish(r.id) },
+                      btn("GPS Навигатор") { openNav(r) },
+                      btn("Быстрые ответы") { openQuick(r) },
+                      btn("Помощь в пути") {
+                          send("/ans " + r.id + " Приветствую, сейчас попробую вам помочь.", "/sp " + r.id)
+                          close("cmp")
+                          openPunish(r.id)
+                      },
+                      btn("Спросить в /a") { send("/a " + r.nick + "[" + r.id + "]: " + r.text); close("cmp") }
+                  )))
+                  panel("cmp", "Жалоба/Вопрос от игрока", b, 360, false)
+              }
+
+              private fun openQuick(r: Report) {
+                  val b = col()
+                  for (a in Core.list(this, "ans", Core.ANS)) add(b, btn(a[0], 0xFF2A2D4A.toInt()) { answer(r, a[1]) })
+                  panel("qa", "Быстрые ответы", b, 340, true)
+              }
+
+              private fun openNav(r: Report) {
+                  val b = col()
+                  for ((cat, items) in Core.nav(this)) {
+                      if (items.isEmpty()) {
+                          add(b, btn(cat, 0xFF2A2D4A.toInt()) { answer(r, "GPS → " + cat) })
+                      } else {
+                          add(b, tv(cat, 14f, true))
+                          for (s in items) add(b, btn(s, 0xFF2A2D4A.toInt()) { answer(r, "GPS → " + cat + " → " + s) })
+                      }
+                  }
+                  panel("nav", "GPS Навигатор", b, 340, true)
+              }
+
+              // ---------- наказания ----------
+              private fun openPunish(id: String) {
+                  val b = col()
+                  for (p in Core.PUN) add(b, btn(p[0]) { openPun(p[0], p[1], id) })
+                  panel("pun", "Наказание ID " + id, b, 190, false)
+              }
+
+              private fun openPun(name: String, tpl: String, id: String) {
+                  var reason = ""
+                  var time = ""
+                  val hasTime = tpl.contains("{time}")
+                  val rs = listOf("ДМ", "ДБ", "ДМ ЗЗ", "ган ЗЗ", "ТК", "СК", "опру", "nonRP")
+                  val ts = listOf("20", "30", "60", "120", "180", "300", "1000", "3000")
+                  val rc = col()
+                  val tc = col()
+                  fun mark(c: LinearLayout, sel: Int) {
+                      for (i in 0 until c.childCount) c.getChildAt(i).background = bg(if (i == sel) 0xFF5B3FD4.toInt() else 0xFF2A2D4A.toInt(), 8)
+                  }
+                  rs.forEachIndexed { i, s -> add(rc, btn(s, 0xFF2A2D4A.toInt()) { reason = s; mark(rc, i) }) }
+                  if (hasTime) ts.forEachIndexed { i, s -> add(tc, btn(s + " мин.", 0xFF2A2D4A.toInt()) { time = s; mark(tc, i) }) }
+                  val cr = et("Другая причина")
+                  val cm = et("Минуты")
+                  val ok = btn("Подтвердить") {
+                      val r = (if (cr.text.isNotBlank()) cr.text.toString() else reason).trim().lowercase()
+                      val t = (if (cm.text.isNotBlank()) cm.text.toString() else time).trim()
+                      if (r.isEmpty() || (hasTime && t.isEmpty())) {
+                          toast("Выберите причину" + (if (hasTime) " и время" else ""))
+                      } else {
+                          send(tpl.replace("{id}", id).replace("{time}", t).replace("{reason}", r))
+                          close("pd")
+                      }
+                  }
+                  val b = col(tv(name + "  ID " + id, 17f, true))
+                  add(b, if (hasTime) row(rc, tc) else row(rc))
+                  add(b, if (hasTime) row(cr, cm) else row(cr))
+                  add(b, row(ok, btn("Отмена", 0xFF8B2C3C.toInt()) { close("pd") }))
+                  panel("pd", "Быстрые наказания", b, 340, true)
+              }
+
+              // ---------- админ меню ----------
+              private fun openAdmin() {
+                  val content = col()
+                  val side = col(btn("Редактор") { editor(content) }, btn("Логи") { logs(content) })
+                  val b = row()
+                  add(b, side, 1f)
+                  add(b, content, 2.4f)
+                  editor(content)
+                  panel("adm", "Админ меню", b, 360, true)
+              }
+
+              private fun editor(c: LinearLayout) {
+                  c.removeAllViews()
+                  add(c, tv("Редактор", 16f, true))
+                  add(c, btn("Быстрые ответы") { listEd(c, "ans", Core.ANS, listOf("Название", "Ответ")) { it[0] + " → " + it[1] } })
+                  add(c, btn("Быстрые наказания") { listEd(c, "rules", Core.RULES, listOf("Сокращение (mu)", "Команда (mute)", "Аргументы (20 2.7 ОП)")) { "/" + it[0] + " → /" + it[1] + " {id} " + (if (it.size > 2) it[2] else "") } })
+              }
+
+              private fun listEd(c: LinearLayout, key: String, def: List<List<String>>, hints: List<String>, fmt: (List<String>) -> String) {
+                  c.removeAllViews()
+                  add(c, btn("← Редактор", 0xFF2A2D4A.toInt()) { editor(c) })
+                  val data = Core.list(this, key, def)
+                  data.forEachIndexed { i, r ->
+                      val rw = row()
+                      add(rw, tv(fmt(r), 12f), 3f)
+                      add(rw, btn("Удалить", 0xFF3A55C8.toInt()) { data.removeAt(i); Core.save(this, key, data); listEd(c, key, def, hints, fmt) }, 1.3f)
+                      add(c, rw)
+                  }
+                  val f = hints.map { et(it) }
+                  f.forEach { add(c, it) }
+                  add(c, btn("Добавить") {
+                      val v = f.map { it.text.toString().trim() }
+                      if (v.take(2).all { it.isNotEmpty() }) {
+                          data.add(v.toMutableList())
+                          Core.save(this, key, data)
+                          listEd(c, key, def, hints, fmt)
+                      }
+                  })
+              }
+
+              private fun logs(c: LinearLayout) {
+                  c.removeAllViews()
+                  add(c, tv("Логи", 16f, true))
+                  val q = et("Поиск по чату")
+                  val out = col()
+                  fun upd() {
+                      out.removeAllViews()
+                      val s = q.text.toString().trim()
+                      val m = Core.logs.filter { s.isEmpty() || it.contains(s, true) }.takeLast(60).reversed()
+                      if (m.isEmpty()) add(out, tv("Ничего нет"))
+                      for (l in m) add(out, tv(l, 12f))
+                  }
+                  q.addTextChangedListener(object : TextWatcher {
+                      override fun afterTextChanged(s: Editable?) { upd() }
+                      override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, d: Int) {}
+                      override fun onTextChanged(s: CharSequence?, a: Int, b: Int, d: Int) {}
+                  })
+                  add(c, q)
+                  add(c, out)
+                  upd()
+              }
+          }
+          GMT_EOF_11
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish APK to Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "Grand Mobile Tools build ${{ github.run_number }}"
+          files: app/build/outputs/apk/debug/app-debug.apk
